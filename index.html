@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="中国語カード">
+<title>中国語カード</title>
+<style>
+:root{--bg:#faf9f6;--fg:#222;--mut:#777;--card:#fff;--line:#ddd;--acc:#b5392e;--ok:#2e7d4f;--mid:#c98a1b;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);color-scheme:light}
+@media(prefers-color-scheme:dark){:root{--bg:#1b1b1a;--fg:#eee;--mut:#999;--card:#262624;--line:#3a3a37;color-scheme:dark}}
+html,body{margin:0;background:var(--bg);color:var(--fg);font-family:-apple-system,"Hiragino Sans",sans-serif}
+#app{max-width:480px;margin:0 auto;padding:16px}
+h1{font-size:20px;margin:4px 0 14px}
+button,input,textarea,select{font:inherit;color:inherit}
+button{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 14px}
+button.p{background:var(--acc);color:#fff;border-color:var(--acc)}
+button:disabled{opacity:.4}
+.row{display:flex;gap:8px;align-items:center}.sp{justify-content:space-between}
+.set{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:10px}
+.mut{color:var(--mut);font-size:13px}
+#card{background:var(--card);border:1px solid var(--line);border-radius:16px;min-height:300px;padding:20px;text-align:center;display:flex;flex-direction:column;justify-content:center;gap:10px;transition:transform .15s}
+.big{font-size:32px;font-weight:600}.zh{font-size:40px;font-weight:600}.py{font-size:20px;color:var(--acc)}
+.emo{font-size:56px}img.im{max-width:140px;max-height:140px;border-radius:10px;margin:0 auto}
+.btns{display:flex;gap:8px;margin-top:14px}.btns button{flex:1;padding:14px 0;font-weight:600;color:#fff;border:0}
+input,textarea,select{width:100%;box-sizing:border-box;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px;margin:3px 0 8px}
+label{font-size:13px;color:var(--mut)}
+</style></head><body><div id="app"></div>
+<script>
+const DAY=864e5,IV=[0,1,3,7,14,30,60];
+let S={cards:[],sets:[],known:[],voice:'',rate:0.85,gkey:'',gvoice:'cmn-CN-Wavenet-A',gvlist:[],gjvoice:'ja-JP-Neural2-B',lpause:3,lex:true,l2:false,lrnd:false,lloop:false},Q=[],mode='',fl=false,view='home',arg=null,done=0,tot=0,P=null,impT='';
+const $=s=>document.querySelector(s),uid=()=>Math.random().toString(36).slice(2,9);
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const byId=id=>S.cards.find(c=>c.id===id);
+function mk(o){return Object.assign({id:uid(),set:'',tag:'',jp:'',jpEx:'',zh:'',py:'',zhEx:'',emo:'',img:'',box:0,due:0,streak:0,lapses:0,weak:false,last:0},o)}
+function load(){try{const d=JSON.parse(localStorage.getItem('zhcards')||'null');if(d)S=Object.assign(S,d)}catch(e){}}
+function save(){try{localStorage.setItem('zhcards',JSON.stringify(S))}catch(e){alert('保存できません（容量不足の可能性）')}}
+function go(v,a){view=v;arg=a;render()}
+/* 音声（端末内蔵。次の段階でGoogle TTSに差し替え） */
+const vs=()=>window.speechSynthesis?speechSynthesis.getVoices().filter(v=>/^zh/i.test(v.lang)):[];
+function pick(){const l=vs();return l.find(v=>v.name===S.voice)||l.find(v=>/enhanced|premium|neural|natural/i.test(v.name))||l.find(v=>v.lang.replace('_','-')==='zh-CN')||l[0]}
+function devSay(t){if(!t||!window.speechSynthesis)return;speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(t),v=pick();if(v)u.voice=v;u.lang='zh-CN';u.rate=S.rate;speechSynthesis.speak(u)}
+/* Google TTS（キー未設定なら端末内蔵にフォールバック） */
+const DB=new Promise((ok,ng)=>{const r=indexedDB.open('zhaudio',1);r.onupgradeneeded=()=>r.result.createObjectStore('a');r.onsuccess=()=>ok(r.result);r.onerror=ng});
+const dbGet=k=>DB.then(d=>new Promise(ok=>{const q=d.transaction('a').objectStore('a').get(k);q.onsuccess=()=>ok(q.result);q.onerror=()=>ok()})).catch(()=>{});
+const dbPut=(k,v)=>DB.then(d=>new Promise(ok=>{const t=d.transaction('a','readwrite');t.objectStore('a').put(v,k);t.oncomplete=ok;t.onerror=ok})).catch(()=>{});
+const dbAll=()=>DB.then(d=>new Promise(ok=>{const o={},q=d.transaction('a').objectStore('a').openCursor();q.onsuccess=()=>{const c=q.result;if(c){o[c.key]=c.value;c.continue()}else ok(o)};q.onerror=()=>ok(o)})).catch(()=>({}));
+async function bkSave(){const o={...S};delete o.gkey;o.lastBk=Date.now();const n='中国語カード-'+new Date().toISOString().slice(0,10)+'.json',f=new File([JSON.stringify({v:1,s:o,a:await dbAll()})],n,{type:'application/json'});
+if(navigator.canShare&&navigator.canShare({files:[f]})){try{await navigator.share({files:[f]});S.lastBk=Date.now();save();return}catch(e){if(e.name==='AbortError')return}}
+const a=document.createElement('a');a.href=URL.createObjectURL(f);a.download=n;a.click();S.lastBk=Date.now();save()}
+function bkLoad(f){if(!f)return;const r=new FileReader();r.onload=async()=>{try{const d=JSON.parse(r.result);if(!d.s||!d.s.cards)throw 0;Object.assign(S,d.s);save();for(const k in(d.a||{}))await dbPut(k,d.a[k]);alert('復元しました');go('home')}catch(e){alert('読み込めません')}};r.readAsText(f)}
+const inf={};
+function tts(t){const k=S.gvoice+'|'+S.rate+'|'+t;if(inf[k])return inf[k];
+return inf[k]=(async()=>{try{const b=await dbGet(k);if(b)return b;
+const r=await fetch('https://texttospeech.googleapis.com/v1/text:synthesize?key='+encodeURIComponent(S.gkey),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({input:{text:t},voice:{languageCode:'cmn-CN',name:S.gvoice},audioConfig:{audioEncoding:'MP3',speakingRate:S.rate}})});
+const j=await r.json();if(!r.ok)throw new Error(j.error&&j.error.message||r.status);
+await dbPut(k,j.audioContent);return j.audioContent}finally{delete inf[k]}})()}
+let AC=null,SRC=null;
+function ac(){if(!AC)AC=new(window.AudioContext||window.webkitAudioContext)();if(AC.state!=='running')AC.resume();return AC}
+['touchend','click'].forEach(e=>document.addEventListener(e,ac,{passive:true}));
+async function play(b64){const c=ac(),bin=atob(b64),u=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);const buf=await c.decodeAudioData(u.buffer);if(SRC)try{SRC.stop()}catch(e){}SRC=c.createBufferSource();SRC.buffer=buf;SRC.connect(c.destination);SRC.start()}
+async function say(t,loud){if(!t)return;if(S.gkey){try{await play(await tts(t));return}catch(e){if(loud)alert('Google音声エラー: '+e.message)}}devSay(t)}
+let pf={n:0,t:0};
+async function pre(list){if(!S.gkey)return;const T=[];(list||[]).forEach(c=>{if(c){T.push(c.zh);if(c.zhEx)T.push(c.zhEx)}});const big=T.length>2;if(big)pf={n:0,t:T.length};
+for(const t of T){try{await tts(t)}catch(e){if(big)alert('音声の準備を中断しました: '+e.message);break}if(big){pf.n++;if(view==='home')render()}}
+if(big){pf={n:0,t:0};if(view==='home')render()}}
+function preAll(){if(!S.gkey)return alert('APIキーを入力してください');const T=S.cards,ch=T.reduce((a,c)=>a+c.zh.length+(c.zhEx||'').length,0);if(confirm(`${T.length}枚（最大約${ch}文字）の音声を準備します。生成済みの分は再利用されます。`)){pre(T);go('home')}}
+async function gList(){try{const r=await fetch('https://texttospeech.googleapis.com/v1/voices?languageCode=cmn-CN&key='+encodeURIComponent(S.gkey)),j=await r.json();if(!r.ok)throw new Error(j.error&&j.error.message||r.status);S.gvlist=(j.voices||[]).map(v=>v.name);save();render()}catch(e){alert('取得できません: '+e.message)}}
+/* リスニングモード */
+let LS=null,LTK=0,LR=null,WLk=null;
+const sh=a=>a.slice().sort(()=>Math.random()-.5);
+const wait=ms=>new Promise(ok=>{LR=ok;setTimeout(ok,ms)});
+async function wl(on){try{if(on)WLk=await navigator.wakeLock.request('screen');else if(WLk){WLk.release();WLk=null}}catch(e){}}
+function ttsJ(t){const k='ja|'+S.gjvoice+'|'+t;if(inf[k])return inf[k];
+return inf[k]=(async()=>{try{const b=await dbGet(k);if(b)return b;
+const r=await fetch('https://texttospeech.googleapis.com/v1/text:synthesize?key='+encodeURIComponent(S.gkey),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({input:{text:t},voice:{languageCode:'ja-JP',name:S.gjvoice},audioConfig:{audioEncoding:'MP3'}})});
+const j=await r.json();if(!r.ok)throw new Error(j.error&&j.error.message||r.status);
+await dbPut(k,j.audioContent);return j.audioContent}finally{delete inf[k]}})()}
+function playW(b64){return new Promise(async ok=>{try{const c=ac(),bin=atob(b64),u=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);const buf=await c.decodeAudioData(u.buffer);if(SRC)try{SRC.stop()}catch(e){}const x=c.createBufferSource();SRC=x;x.buffer=buf;x.connect(c.destination);x.onended=ok;x.start()}catch(e){ok()}})}
+async function sayW(t,ja){if(!t)return;if(S.gkey){try{await playW(await(ja?ttsJ(t):tts(t)));return}catch(e){}}
+return new Promise(ok=>{if(!window.speechSynthesis)return ok();speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(t);u.lang=ja?'ja-JP':'zh-CN';if(!ja){const v=pick();if(v)u.voice=v;u.rate=S.rate}u.onend=u.onerror=()=>ok();speechSynthesis.speak(u)})}
+function lstop(){LTK++;if(LR)LR();try{if(SRC)SRC.stop()}catch(e){}if(window.speechSynthesis)speechSynthesis.cancel()}
+async function lloop(){const my=++LTK,live=()=>LS&&LS.run&&my===LTK;
+while(live()){if(LS.i>=LS.l.length){if(S.lloop){LS.i=0;if(S.lrnd)LS.l=sh(LS.l)}else{LS.run=false;break}}
+const c=LS.l[LS.i],nx=LS.l[LS.i+1];
+if(S.gkey&&nx){ttsJ(nx.jp).catch(()=>{});tts(nx.zh).catch(()=>{});if(S.lex&&nx.zhEx)tts(nx.zhEx).catch(()=>{})}
+LS.ph=0;render();await sayW(c.jp,1);if(!live())break;
+await wait(S.lpause*1000);if(!live())break;
+LS.ph=1;render();await sayW(c.zh);if(!live())break;
+if(S.l2){await wait(700);if(!live())break;await sayW(c.zh);if(!live())break}
+if(S.lex&&c.zhEx){await wait(500);if(!live())break;await sayW(c.zhEx);if(!live())break}
+await wait(1200);if(!live())break;LS.i++}
+if(my===LTK)render()}
+function listen(k){const l=k==='__weak'?S.cards.filter(c=>c.weak):S.cards.filter(c=>c.set===k);if(!l.length)return;LS={l:S.lrnd?sh(l):l.slice(),i:0,run:true,ph:0};wl(true);go('listen');lloop()}
+function lpp(){if(LS.run){LS.run=false;lstop();render()}else{if(LS.i>=LS.l.length)LS.i=0;LS.run=true;lloop()}}
+function lskip(d){const was=LS.run;lstop();LS.i=Math.max(0,Math.min(LS.l.length-1,LS.i+d));LS.ph=0;if(was){LS.run=true;lloop()}else render()}
+function lexit(){if(LS)LS.run=false;lstop();LS=null;wl(false);go('home')}
+/* 学習 */
+function start(k){const n=Date.now();let L;
+if(k==='__weak')L=S.cards.filter(c=>c.weak).map(c=>({c,s:(n-(c.last||0))/DAY+(c.lapses||0)*.5+Math.random()*2})).sort((a,b)=>b.s-a.s).slice(0,20).map(x=>x.c);
+else if(k==='__due')L=S.cards.filter(c=>c.due<=n).sort(()=>Math.random()-.5).slice(0,30);
+else L=S.cards.filter(c=>c.set===k&&c.due<=n);
+Q=L.map(c=>c.id).sort(()=>Math.random()-.5);tot=Q.length;mode=k;fl=false;done=0;go('study')}
+function flip(){const el=$('#card');el.style.transform='rotateY(90deg)';setTimeout(()=>{fl=!fl;render();const e=$('#card');e.style.transform='rotateY(90deg)';requestAnimationFrame(()=>requestAnimationFrame(()=>{e.style.transform='rotateY(0)'}));if(fl)say(byId(Q[0]).zh)},150)}
+function rate(r){const id=Q.shift(),c=byId(id),n=Date.now();c.last=n;done++;{const k=dkey(n);S.log=S.log||{};S.log[k]=(S.log[k]||0)+1}
+if(r===2){c.box=Math.min(c.box+1,6);c.streak++;c.due=n+IV[c.box]*DAY;if(c.weak&&c.streak>=3)c.weak=false}
+else if(r===1){c.streak=0;c.weak=true;c.due=n+DAY}
+else{c.box=0;c.streak=0;c.weak=true;c.lapses++;c.due=n+6e5;Q.push(id)}
+save();fl=false;render()}
+function pic(c,s){return c.img?`<img class="im" src="${c.img}">`:(c.emo?`<div class="emo">${esc(c.emo)}</div>`:'')}
+function resize(f,cb){const r=new FileReader();r.onload=()=>{const i=new Image();i.onload=()=>{const k=Math.min(1,260/Math.max(i.width,i.height)),cv=document.createElement('canvas');cv.width=i.width*k;cv.height=i.height*k;cv.getContext('2d').drawImage(i,0,0,cv.width,cv.height);cb(cv.toDataURL('image/jpeg',.7))};i.src=r.result};r.readAsDataURL(f)}
+/* 取り込み解析 */
+const PROMPT=`以下のYouTube動画の文字起こしから、中国語の語彙リストを作成してください。
+
+【前提条件】
+・中国滞在3年程度で日常会話は問題なく話せるレベル。
+・初中級の基礎単語（你好、谢谢、喜欢、觉得、准备、比赛など）は除外。
+・中国語はすべて簡体字。ピンインは声調記号つき。
+
+【抽出基準：発話の方程式】
+「知っていそうでパッと口から出ないもの」「聞き落としやすいもの」を少し多めに拾う。
+1. 但し書き（前置き・条件・接続詞）
+2. 主語・目的語（生活・実務の具体的名詞、道具、概念）
+3. 意思（助動詞・願望・心の動き）
+4. メーター（程度・語気・副詞・描写形容詞）
+5. 基準（介詞フレーズ）
+6. 即決動詞（日常の具体的アクション、比喩的動詞）
+
+【出力フォーマット】
+1行目に「動画: 動画タイトル」と書く。
+その後は分類ごとに分けず、1つの表にまとめる。1行1語（「A / B」のように2語を1行に入れない）。
+| 分類 | 中国語（簡体字） | ピンイン | 日本語訳 | 中国語の例文 | 例文の日本語訳 |
+
+動画URL：[ここにURLを貼る]`;
+const hk=h=>/例文|文脈/.test(h)?(/日本語|和訳/.test(h)?'jpEx':/中国語/.test(h)?'zhEx':'ex'):/分類/.test(h)?'tag':/ピンイン/.test(h)?'py':/中国語/.test(h)?'zh':/日本語|訳/.test(h)?'jp':'';
+function parse(t){let base='',tag='',cols=null,rows=[];
+for(let l of t.split('\n')){l=l.replace(/\*\*|`/g,'').trim();if(!l)continue;
+let m=l.match(/^(?:動画|video)\s*[:：]\s*(.+)/i);if(m){base=m[1].trim();continue}
+if(/^\|?[\s:\-|]+\|?$/.test(l)&&l.includes('-'))continue;
+let c;if(l.includes('|'))c=l.replace(/^\||\|$/g,'').split('|').map(x=>x.trim());else if(l.includes('\t'))c=l.split('\t').map(x=>x.trim());
+else{m=l.match(/^#*\s*\d+[\.．、]\s*(.+)/)||l.match(/^#+\s*(.+)/);if(m)tag=m[1].replace(/[（(].*$/,'').trim();continue}
+if(c.some(x=>x.includes('ピンイン'))){cols=c.map(hk);continue}
+const cs=cols||(c.length>=6?['tag','zh','py','jp','zhEx','jpEx']:c.length==5?['zh','py','jp','zhEx','jpEx']:['zh','py','jp','ex']);
+const o={tag};c.forEach((v,i)=>{if(cs[i])o[cs[i]]=v});
+if(o.ex){const x=o.ex.match(/^(.*)[（(]([^（()）]*)[）)]\s*$/);if(x){o.zhEx=x[1].replace(/[\s/／]+$/,'').trim();o.jpEx=x[2]}else o.zhEx=o.ex}
+if(o.zh&&o.jp)rows.push(o)}
+const ex=new Set(S.cards.map(c=>c.zh)),kn=new Set(S.known),seen=new Set();
+rows.forEach(r=>{r.st=ex.has(r.zh)||seen.has(r.zh)?'重複':kn.has(r.zh)?'既知':'';seen.add(r.zh);r.inc=!r.st});
+return{base,rows}}
+function readImp(){impT=$('#i_t').value;const r=parse(impT);if(!r.rows.length){alert('単語を読み取れませんでした。形式を確認してください。');return}
+P={rows:r.rows,base:r.base||('取り込み '+new Date().toLocaleDateString('ja-JP')),size:25};render()}
+function paste(){navigator.clipboard.readText().then(t=>{$('#i_t').value=t;readImp()}).catch(()=>alert('貼り付けできませんでした。手動で貼ってください。'))}
+function tg(i){P.base=$('#p_b').value;P.size=$('#p_n').value;P.rows[i].inc=!P.rows[i].inc;render()}
+function doImp(){const base=$('#p_b').value.trim()||'取り込み',size=+$('#p_n').value||25,cnt={};
+S.cards.forEach(c=>cnt[c.set]=(cnt[c.set]||0)+1);
+const re=new RegExp('^'+base.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+' (\\d+)$'),nm=k=>base+' '+String(k).padStart(2,'0');
+let m=0;S.sets.forEach(s=>{const x=s.match(re);if(x)m=Math.max(m,+x[1])});
+let cur=m?((cnt[nm(m)]||0)<size?m:m+1):1,a=0,k=0;
+P.rows.forEach(r=>{if(r.inc){if((cnt[nm(cur)]||0)>=size)cur++;const s=nm(cur);if(!S.sets.includes(s))S.sets.push(s);S.cards.push(mk({set:s,tag:r.tag||'',jp:r.jp,jpEx:r.jpEx||'',zh:r.zh,py:r.py||'',zhEx:r.zhEx||''}));cnt[s]=(cnt[s]||0)+1;a++}else if(!r.st){S.known.push(r.zh);k++}});
+save();pre(a?S.cards.slice(-a):[]);P=null;impT='';alert(`${a}枚を追加しました。既知リストに${k}語を追加。`);go('home')}
+/* 画面 */
+const dkey=t=>new Date(t).toLocaleDateString('sv');
+const pc=l=>l.length?Math.round(l.reduce((a,c)=>a+Math.min(c.box,5)/5,0)/l.length*100):0;
+const ring=p=>`<div style="width:84px;height:84px;border-radius:50%;margin:8px auto;background:conic-gradient(var(--acc) ${p*3.6}deg,var(--line) 0);display:flex;align-items:center;justify-content:center"><div style="width:62px;height:62px;border-radius:50%;background:var(--card);display:flex;align-items:center;justify-content:center;font-weight:600">${p}%</div></div>`;
+const bar=p=>`<div style="height:8px;background:var(--line);border-radius:4px"><div style="height:8px;border-radius:4px;background:var(--acc);width:${p}%"></div></div>`;
+const bars=a=>{const m=Math.max(1,...a);return `<div style="display:flex;gap:6px;align-items:flex-end;height:80px;margin-top:6px">${a.map(v=>`<div class="mut" style="flex:1;text-align:center;font-size:11px">${v}<div style="background:var(--acc);height:${Math.round(v/m*50)}px;border-radius:3px"></div></div>`).join('')}</div>`};
+const nav=c=>`<div style="position:fixed;left:0;right:0;bottom:0;padding-bottom:env(safe-area-inset-bottom,0px);background:var(--card);border-top:1px solid var(--line);display:flex;justify-content:space-around">${[['home','セット'],['weak','苦手'],['prog','進捗']].map(([v,t])=>`<button onclick="go('${v}')" style="border:0;background:none;padding:14px 22px;${c===v?'color:var(--acc);font-weight:600':''}">${t}</button>`).join('')}</div><div style="height:70px"></div>`;
+function render(){const A=$('#app');
+if(view==='home'){const n=Date.now(),due=S.cards.filter(c=>c.due<=n).length;
+A.innerHTML=`<h1>セット</h1>
+<div class="set"><div class="row sp"><b>今日の復習 ${due} 枚</b><button class="p" onclick="start('__due')" ${due?'':'disabled'}>始める</button></div></div>
+${S.sets.length?'':'<div class="set mut">まだカードがありません。下の「取り込み」からAIの出力を貼り付けてください。</div>'}
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">${S.sets.map(s=>{const l=S.cards.filter(c=>c.set===s),d=l.filter(c=>c.due<=n).length;return `<div class="set" style="margin:0;text-align:center"><b>${esc(s)}</b><div class="mut">${l.length}枚 ／ 今日 ${d}枚</div>${ring(pc(l))}<div class="row" style="justify-content:center;flex-wrap:wrap"><button class="p" onclick="start('${esc(s)}')" ${d?'':'disabled'}>学習</button><button onclick="go('edit',{set:'${esc(s)}'})">＋</button><button onclick="listen('${esc(s)}')">🎧</button></div></div>`}).join('')}</div>
+${pf.t?`<div class="mut" style="margin-top:8px">音声を準備中 ${pf.n}/${pf.t}</div>`:''}
+<div class="row" style="flex-wrap:wrap;margin-top:12px"><button class="p" onclick="P=null;go('imp')">取り込み</button><button onclick="newSet()">セット追加</button><button onclick="go('cards')">カード一覧</button><button onclick="go('set')">設定</button></div>${nav('home')}`}
+else if(view==='weak'){const w=S.cards.filter(c=>c.weak);
+A.innerHTML=`<h1>苦手</h1><div class="set"><div class="row sp"><div><b>${w.length}枚</b><div class="mut">全セット横断・1回20枚まで</div></div><div class="row"><button class="p" onclick="start('__weak')" ${w.length?'':'disabled'}>復習する</button><button onclick="listen('__weak')" ${w.length?'':'disabled'}>🎧</button></div></div></div>${w.map(c=>`<div class="set" onclick="go('edit',{id:'${c.id}'})"><b>${esc(c.zh)}</b> <span class="py" style="font-size:14px">${esc(c.py)}</span><div>${esc(c.jp)} <span class="mut">間違い${c.lapses}回</span></div></div>`).join('')}${nav('weak')}`}
+else if(view==='prog'){const n=Date.now(),L=S.log||{},t0=new Date().setHours(0,0,0,0),m=S.cards.filter(c=>c.box>=5).length;
+let i=L[dkey(n)]?0:1,st=0;while(L[dkey(n-i*DAY)]){st++;i++}
+const past=[6,5,4,3,2,1,0].map(k=>L[dkey(n-k*DAY)]||0),fut=[0,1,2,3,4,5,6].map(k=>S.cards.filter(c=>Math.max(0,Math.floor((c.due-t0)/DAY))===k).length);
+A.innerHTML=`<h1>進捗</h1><div class="set" style="text-align:center"><b>全体の到達度</b>${ring(pc(S.cards))}<div class="mut">完璧（30日以上先まで覚えた）${m} / ${S.cards.length}枚</div></div>
+<div class="set"><b>学習記録</b><div class="mut">今日 ${L[dkey(n)]||0}回 ／ 連続 ${st}日</div><div class="mut" style="margin-top:8px">過去7日の学習回数</div>${bars(past)}</div>
+<div class="set"><b>復習の予定</b><div class="mut">今日から7日間のカード枚数</div>${bars(fut)}</div>
+<div class="set"><b>セット別</b>${S.sets.map(s=>{const p=pc(S.cards.filter(c=>c.set===s));return `<div style="margin:10px 0"><div class="row sp"><span>${esc(s)}</span><span class="mut">${p}%</span></div>${bar(p)}</div>`}).join('')}</div>${nav('prog')}`}
+else if(view==='listen'){const c=LS.l[Math.min(LS.i,LS.l.length-1)];
+A.innerHTML=`<div class="row sp mut"><button onclick="lexit()">←</button><span>🎧 ${Math.min(LS.i+1,LS.l.length)}/${LS.l.length}</span><span style="width:44px"></span></div><div style="height:10px"></div>
+<div id="card" style="min-height:340px">${LS.ph?`${pic(c)}<div class="zh">${esc(c.zh)}</div><div class="py">${esc(c.py)}</div><div style="font-size:20px">${esc(c.zhEx)}</div><div class="mut">${esc(c.jp)}</div>`:`${pic(c)}<div class="big">${esc(c.jp)}</div><div class="mut" style="font-size:16px">${esc(c.jpEx)}</div>`}</div>
+<div class="btns"><button style="background:var(--mut)" onclick="lskip(-1)">⏮</button><button style="background:var(--acc)" onclick="lpp()">${LS.run?'⏸ 一時停止':'▶ 再生'}</button><button style="background:var(--mut)" onclick="lskip(1)">⏭</button></div>
+<div class="mut" style="margin-top:10px;text-align:center">学習の記録には反映されません</div>`}
+else if(view==='study'){const c=byId(Q[0]);
+if(!c){A.innerHTML=`<h1>おつかれさま 🎉</h1><p>${done}回分、終わりました。</p><button class="p" onclick="go('home')">ホームへ</button>`;return}
+pre([c,byId(Q[1])]);A.innerHTML=`<div class="row sp mut"><button onclick="go('home')">←</button><div style="flex:1;height:8px;background:var(--line);border-radius:4px;margin:0 10px"><div style="height:8px;border-radius:4px;background:var(--acc);width:${(tot-Q.length)/Math.max(tot,1)*100}%"></div></div><span>${tot-Q.length}/${tot}</span><button onclick="go('edit',{id:'${c.id}'})">✎</button></div><div style="height:10px"></div>
+<div id="card" onclick="flip()">${fl?`${pic(c)}<div class="zh">${esc(c.zh)}</div><div class="py">${esc(c.py)}</div><div><button onclick="event.stopPropagation();say(byId('${c.id}').zh)">🔊 単語</button></div><hr style="width:100%;border:0;border-top:1px solid var(--line)"><div style="font-size:20px">${esc(c.zhEx)}</div>${c.zhEx?`<div><button onclick="event.stopPropagation();say(byId('${c.id}').zhEx)">🔊 例文</button></div>`:''}<div class="mut">${esc(c.jpEx)}</div>`
+:`${pic(c)}<div class="big">${esc(c.jp)}</div><div class="mut" style="font-size:16px">${esc(c.jpEx)}</div><div class="mut">${esc(c.tag)}　タップで裏へ</div>`}</div>
+${fl?`<div class="btns"><button style="background:var(--acc)" onclick="rate(0)">わからない</button><button style="background:var(--mid)" onclick="rate(1)">ちょっと</button><button style="background:var(--ok)" onclick="rate(2)">わかった</button></div>`:''}`}
+else if(view==='edit'){const c=arg.id?byId(arg.id):mk({set:arg.set});
+A.innerHTML=`<h1>${arg.id?'カード編集':'カード追加'}</h1>
+<label>日本語</label><input id="f_jp" value="${esc(c.jp)}"><label>日本語の例文</label><input id="f_jpEx" value="${esc(c.jpEx)}">
+<label>中国語</label><input id="f_zh" value="${esc(c.zh)}"><label>ピンイン</label><input id="f_py" value="${esc(c.py)}"><label>中国語の例文</label><input id="f_zhEx" value="${esc(c.zhEx)}">
+<label>絵文字（イメージ用）</label><input id="f_emo" value="${esc(c.emo)}"><label>写真（任意）</label><input type="file" accept="image/*" id="f_img">
+<div class="row"><button class="p" onclick="saveCard('${c.id}','${esc(c.set)}',${!!arg.id})">保存</button><button onclick="go('home')">戻る</button>${arg.id?`<button onclick="delCard('${c.id}')">削除</button>`:''}</div>`;
+$('#f_img').onchange=e=>resize(e.target.files[0],d=>{window._img=d})}
+else if(view==='imp'){
+if(!P)A.innerHTML=`<h1>取り込み</h1><div class="row"><button onclick="navigator.clipboard.writeText(PROMPT).then(()=>alert('コピーしました'))">AIへの指示文をコピー</button><button class="p" onclick="paste()">貼り付けて読み込む</button></div><div style="height:10px"></div><textarea id="i_t" rows="8" placeholder="AIの出力をここに貼り付け">${esc(impT)}</textarea><div class="row"><button onclick="readImp()">読み込む</button><button onclick="go('home')">戻る</button></div>`;
+else{const a=P.rows.filter(r=>r.inc).length,d=P.rows.filter(r=>r.st==='重複').length,k=P.rows.filter(r=>r.st==='既知').length;
+A.innerHTML=`<h1>プレビュー</h1><div class="mut">追加 ${a}枚 ／ 重複 ${d} ／ 既知 ${k} ／ 外した ${P.rows.length-a-d-k}</div><div class="mut">知っている単語はタップで外す（次回から自動で除外されます）</div>
+<label>セット名</label><input id="p_b" value="${esc(P.base)}"><label>1セットの枚数</label><input id="p_n" type="number" value="${esc(P.size)}">
+${P.rows.map((r,i)=>`<div class="set" onclick="tg(${i})" style="opacity:${r.inc?1:.45}">${r.inc?'☑':'☐'} <b>${esc(r.zh)}</b> <span class="py" style="font-size:14px">${esc(r.py)}</span><div>${esc(r.jp)} <span class="mut">${esc(r.tag)}${r.st?'（'+r.st+'）':''}</span></div></div>`).join('')}
+<div class="row"><button class="p" onclick="doImp()">取り込む</button><button onclick="P=null;render()">やり直す</button></div>`}}
+else if(view==='cards'){A.innerHTML=`<h1>カード一覧</h1><button onclick="go('home')">戻る</button><div style="height:10px"></div>${S.cards.map(c=>`<div class="set" onclick="go('edit',{id:'${c.id}'})">${esc(c.emo)} <b>${esc(c.jp)}</b> ／ ${esc(c.zh)} <span class="mut">${esc(c.set)}${c.weak?' ・苦手':''}</span></div>`).join('')}`}
+else if(view==='set'){const l=vs();A.innerHTML=`<h1>設定</h1><label>Google音声のAPIキー</label><input type="password" value="${esc(S.gkey)}" onchange="S.gkey=this.value.trim();save()">
+<label>Google音声</label><select onchange="S.gvoice=this.value;save()">${[...new Set([S.gvoice,...(S.gvlist.length?S.gvlist:['cmn-CN-Wavenet-A','cmn-CN-Wavenet-B','cmn-CN-Wavenet-C','cmn-CN-Wavenet-D'])])].map(n=>`<option ${n===S.gvoice?'selected':''}>${n}</option>`).join('')}</select>
+<div class="row" style="flex-wrap:wrap;margin-bottom:10px"><button onclick="gList()">音声一覧を取得</button><button onclick="preAll()">全カードの音声を準備</button></div>
+<label>端末内蔵の音声（キー未設定・エラー時の予備）</label><select onchange="S.voice=this.value;save()"><option value="">自動（高品質を優先）</option>${l.map(v=>`<option ${v.name===S.voice?'selected':''}>${esc(v.name)}</option>`).join('')}</select>
+<label>読み上げ速度 ${S.rate}</label><input type="range" min="0.5" max="1.2" step="0.05" value="${S.rate}" oninput="S.rate=+this.value;save()" onchange="render()"><button onclick="say('你好，今天天气很好。',1)">🔊 試し聞き</button>
+<p class="mut">既知リスト：${S.known.length}語 <button onclick="if(confirm('リセットしますか？')){S.known=[];save();render()}">リセット</button></p>
+<b>🎧 リスニングモード</b>
+<label>日本語のあと中国語まで待つ時間（${S.lpause}秒）</label><input type="range" min="1" max="8" value="${S.lpause}" oninput="S.lpause=+this.value;save()" onchange="render()">
+${[['lex','中国語の例文も読む'],['l2','中国語の単語を2回読む'],['lrnd','ランダム順'],['lloop','最後まで行ったら最初から繰り返す']].map(([k,t])=>`<div><label style="color:var(--fg)"><input type="checkbox" style="width:auto;margin-right:6px" ${S[k]?'checked':''} onchange="S.${k}=this.checked;save()">${t}</label></div>`).join('')}
+<label style="margin-top:8px;display:block">日本語の音声（Google）</label><select onchange="S.gjvoice=this.value;save()">${['ja-JP-Neural2-B','ja-JP-Neural2-C','ja-JP-Neural2-D','ja-JP-Wavenet-A','ja-JP-Wavenet-B'].map(n=>`<option ${n===S.gjvoice?'selected':''}>${n}</option>`).join('')}</select>
+<label>バックアップファイル（カード＋音声）　最後の保存：${S.lastBk?new Date(S.lastBk).toLocaleDateString('ja-JP'):'まだありません'}</label>
+<div class="row" style="flex-wrap:wrap;margin-bottom:6px"><button class="p" onclick="bkSave()">ファイルに保存</button><button onclick="$('#bk_f').click()">ファイルから復元</button><input type="file" id="bk_f" accept=".json,application/json" style="display:none" onchange="bkLoad(this.files[0])"></div>
+<p class="mut">共有メニューで「ファイルに保存」（iCloud Drive）やAirDropを選ぶと、PCにも置けます。</p>
+<label>文字だけのバックアップ（コピー用・音声なし）</label><textarea id="s_b" rows="5"></textarea><div class="row"><button onclick="const o={...S};delete o.gkey;$('#s_b').value=JSON.stringify(o)">書き出し</button><button onclick="restore()">復元</button><button onclick="go('home')">戻る</button></div>`}}
+function newSet(){const n=prompt('セット名');if(n&&!S.sets.includes(n)){S.sets.push(n);save();render()}}
+function saveCard(id,set,ex){const g=k=>$('#f_'+k).value.trim();let c=ex?byId(id):mk({set});
+Object.assign(c,{jp:g('jp'),jpEx:g('jpEx'),zh:g('zh'),py:g('py'),zhEx:g('zhEx'),emo:g('emo')});if(window._img){c.img=window._img;window._img=null}
+if(!ex)S.cards.push(c);save();go('home')}
+function delCard(id){if(confirm('削除しますか？')){S.cards=S.cards.filter(c=>c.id!==id);save();go('home')}}
+function restore(){try{const d=JSON.parse($('#s_b').value);if(d.cards){S=Object.assign(S,d);save();go('home')}}catch(e){alert('読み込めません')}}
+load();render();
+</script></body></html>
